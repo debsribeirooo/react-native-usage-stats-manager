@@ -43,9 +43,7 @@ class UsageStatsManagerModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
   private var reactContext: Context = reactContext
 
-  @RequiresApi(Build.VERSION_CODES.M)
-  private var networkStatsManager: NetworkStatsManager? =
-      reactContext.getSystemService(Context.NETWORK_STATS_SERVICE) as NetworkStatsManager
+  private var networkStatsManager: NetworkStatsManager? = null
 
   override fun getName(): String {
     return NAME
@@ -320,17 +318,14 @@ class UsageStatsManagerModule(reactContext: ReactApplicationContext) :
   }
 
   private fun isSystemApp(packageName: String): Boolean {
-    var isSys: Boolean = false
-    try {
+    return try {
       val packageManager: PackageManager? = reactContext?.packageManager
-      val appInfo = packageManager?.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
-      if (appInfo != null && appInfo.flags == ApplicationInfo.FLAG_SYSTEM) {
-        isSys = true
-      }
-      return isSys
-    } catch (e: PackageManager.NameNotFoundException) {
+      if (packageManager == null) return false
+      // Delegate to the utility method which performs proper bitmask checks
+      UsageUtils.isSystemApp(packageManager, packageName)
+    } catch (e: Exception) {
       e.printStackTrace()
-      return isSys
+      false
     }
   }
 
@@ -403,15 +398,18 @@ class UsageStatsManagerModule(reactContext: ReactApplicationContext) :
       startTime: Long,
       endTime: Long
   ): Double {
-    val networkStatsByApp: NetworkStats
     var currentDataUsage = 0.0
     try {
-      networkStatsByApp =
-          networkStatsManager?.querySummary(networkType, subscriberId, startTime, endTime)!!
+      if (networkStatsManager == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        networkStatsManager = reactContext.getSystemService(Context.NETWORK_STATS_SERVICE) as NetworkStatsManager
+      }
+      val networkStatsByApp = networkStatsManager?.querySummary(networkType, subscriberId, startTime, endTime)
+          ?: return 0.0
+
       do {
         val bucket: NetworkStats.Bucket = NetworkStats.Bucket()
         networkStatsByApp.getNextBucket(bucket)
-        if (bucket.getUid() === packageUid) {
+        if (bucket.uid == packageUid) {
           currentDataUsage += bucket.rxBytes + bucket.txBytes
         }
       } while (networkStatsByApp.hasNextBucket())
